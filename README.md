@@ -1,7 +1,7 @@
 # Floor Plan Editor
 A web-based 2D floor plan editor where users can draw and edit room layouts in the browser.
 
-**Status:** In progress 🚧
+**Status:** In progress 🚧**Demo:** https://floorplan-editor-azure.vercel.app/
 
 ## Features
 - [x] Canvas drawing
