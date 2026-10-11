@@ -1,12 +1,11 @@
 import { useRef, useEffect, useState } from 'react'
-import { useStore, type Point, type Wall } from './store'
-
+import { useStore, type Point, type Wall, type Opening } from './store'
 const GRID = 50
 
 type Tool = 'wall' | 'door' | 'window' | 'select' | 'label'
 
 type Drag = {
-  mode: 'wall' | 'end'
+    mode: 'wall' | 'end' | 'opening'
   start: Point
   orig: Wall[]
   index: number
@@ -24,15 +23,17 @@ export default function Canvas() {
   const tool = useRef<Tool>('wall')
   const selected = useRef<number | null>(null)
   const selectedLabel = useRef<number | null>(null)
+    const selectedOpening = useRef<number | null>(null)
   const drag = useRef<Drag | null>(null)
   const skipGrid = useRef(false)
   const includeGridRef = useRef(true)
   const [activeTool, setActiveTool] = useState<Tool>('wall')
   const [includeGrid, setIncludeGrid] = useState(true)
 
-  function clearSelection() {
+    function clearSelection() {
     selected.current = null
     selectedLabel.current = null
+    selectedOpening.current = null
   }
 
   function chooseTool(t: Tool) {
@@ -42,11 +43,13 @@ export default function Canvas() {
     draw()
   }
 
-  function deleteSelected() {
+   function deleteSelected() {
     if (selected.current !== null) {
       useStore.getState().deleteWall(selected.current)
     } else if (selectedLabel.current !== null) {
       useStore.getState().deleteLabel(selectedLabel.current)
+    } else if (selectedOpening.current !== null) {
+      useStore.getState().deleteOpening(selectedOpening.current)
     }
     clearSelection()
     draw()
@@ -123,7 +126,7 @@ export default function Canvas() {
     })
 
     // doors and windows
-    for (const o of st.openings) {
+       for (const [oi, o] of st.openings.entries()) {
       const w = st.walls[o.wallIndex]
       if (!w) continue
       const dx = w.end.x - w.start.x
@@ -154,8 +157,8 @@ export default function Canvas() {
       ctx.stroke()
       ctx.restore()
 
-      ctx.strokeStyle = '#3b82f6'
-      ctx.lineWidth = 2 / scale
+            ctx.strokeStyle = oi === selectedOpening.current ? '#f97316' : '#3b82f6'
+      ctx.lineWidth = (oi === selectedOpening.current ? 3 : 2) / scale
       ctx.lineCap = 'butt'
       if (o.kind === 'window') {
         ctx.beginPath()
@@ -296,7 +299,17 @@ export default function Canvas() {
     v.scale = newScale
     draw()
   }
-
+  function openingCenter(o: Opening, walls: Wall[]) {
+    const w = walls[o.wallIndex]
+    if (!w) return null
+    const dx = w.end.x - w.start.x
+    const dy = w.end.y - w.start.y
+    const len = Math.hypot(dx, dy)
+    if (len === 0) return null
+    const half = Math.min(o.width, len * 0.8) / 2
+    const dist = Math.max(half, Math.min(len - half, o.t * len))
+    return { x: w.start.x + (dx / len) * dist, y: w.start.y + (dy / len) * dist, half }
+  }
   function nearestWall(p: Point) {
     const walls = useStore.getState().walls
     let best = { index: -1, t: 0, dist: Infinity }
@@ -333,13 +346,15 @@ export default function Canvas() {
           const hh = 14 / view.current.scale
           if (Math.abs(p.x - l.x) < hw && Math.abs(p.y - l.y) < hh) li = i
         })
-        if (li >= 0) {
+                if (li >= 0) {
           selectedLabel.current = li
           selected.current = null
+          selectedOpening.current = null
           draw()
           return
         }
         selectedLabel.current = null
+        selectedOpening.current = null
 
         // 1) did we click a wall end?
         let endIndex = -1
@@ -369,7 +384,25 @@ export default function Canvas() {
           draw()
           return
         }
-
+        // 1b) did we click a door or window?
+        let oi = -1
+        let oiDist = Infinity
+        st.openings.forEach((o, i) => {
+          const c = openingCenter(o, walls)
+          if (!c) return
+          const d = Math.hypot(p.x - c.x, p.y - c.y)
+          if (d < Math.max(c.half, 12 / view.current.scale) && d < oiDist) {
+            oiDist = d
+            oi = i
+          }
+        })
+        if (oi >= 0) {
+          selectedOpening.current = oi
+          selected.current = null
+          drag.current = { mode: 'opening', start: p, orig: walls, index: oi, moved: false }
+          draw()
+          return
+        }
         // 2) otherwise, did we click a wall body?
         const best = nearestWall(p)
         if (best.index >= 0 && best.dist < 20 / view.current.scale) {
@@ -428,6 +461,23 @@ export default function Canvas() {
   function moveDragged(e: React.MouseEvent) {
     const d = drag.current
     if (!d) return
+        if (d.mode === 'opening') {
+      const best = nearestWall(toWorld(e))
+      if (best.index < 0 || best.dist > 40 / view.current.scale) return
+      const st = useStore.getState()
+      const o = st.openings[d.index]
+      if (!o || (o.wallIndex === best.index && Math.abs(o.t - best.t) < 0.001)) return
+      if (!d.moved) {
+        st.commitHistory()
+        d.moved = true
+      }
+      st.setOpenings(
+        st.openings.map((op, i) =>
+          i === d.index ? { ...op, wallIndex: best.index, t: best.t } : op
+        )
+      )
+      return
+    }
     const p = snap(toWorld(e))
     const same = (a: Point, b: Point) => a.x === b.x && a.y === b.y
 

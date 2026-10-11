@@ -18,6 +18,8 @@ type State = Snapshot & {
   addWall: (w: Wall) => void
   addOpening: (o: Opening) => void
   addLabel: (l: Label) => void
+    deleteOpening: (index: number) => void
+  setOpenings: (openings: Opening[]) => void
   deleteWall: (index: number) => void
   deleteLabel: (index: number) => void
   commitHistory: () => void
@@ -66,6 +68,15 @@ export const useStore = create<State>((set) => ({
       labels: s.labels.filter((_, i) => i !== index),
       future: [],
     })),
+      deleteOpening: (index) =>
+    set((s) => ({
+      past: [...s.past, snap(s)],
+      openings: s.openings.filter((_, i) => i !== index),
+      future: [],
+    })),
+
+  // no history here: the caller runs commitHistory() once at the start of a drag
+  setOpenings: (openings) => set({ openings }),
 
   commitHistory: () =>
     set((s) => ({ past: [...s.past, snap(s)], future: [] })),
